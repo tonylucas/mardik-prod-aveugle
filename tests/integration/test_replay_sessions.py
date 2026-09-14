@@ -11,15 +11,15 @@ def _agent(llm, telemetry):
     return Agent(llm=llm, tools=DEFAULT_TOOLS, telemetry=telemetry)
 
 
-@pytest.mark.parametrize(
-    ("name", "expected"),
-    [
-        ("replay_delivery", "expédiée"),
-        ("replay_preparation", "en préparation"),
-        ("replay_unknown_order", "introuvable"),
-        ("replay_missing_order_id", "numéro de commande"),
-    ],
-)
+CORPUS = {
+    "replay_delivery": "expédiée",
+    "replay_preparation": "en préparation",
+    "replay_unknown_order": "introuvable",
+    "replay_missing_order_id": "numéro de commande",
+}
+
+
+@pytest.mark.parametrize(("name", "expected"), CORPUS.items())
 def test_each_recorded_session_reaches_its_expected_outcome(
     name, expected, fake_llm, telemetry
 ):
@@ -37,25 +37,30 @@ def test_session_without_order_id_calls_no_tool(fake_llm, telemetry, span_export
     assert "tool.call" not in span_names
 
 
-CORPUS = [
-    "replay_delivery",
-    "replay_preparation",
-    "replay_unknown_order",
-    "replay_missing_order_id",
-]
+def test_concurrent_sessions_do_not_see_each_other_messages(fake_llm, telemetry):
+    """No session may end up holding a message that belongs to another one.
 
-
-def test_concurrent_sessions_keep_their_histories_apart(fake_llm, telemetry):
+    Asserted twice over, because the two failures look nothing alike: the
+    history must match the recording message for message, and the reply must
+    still be the one this session's own order id leads to. A leaked order id
+    makes the agent answer about somebody else's parcel while every history
+    still looks plausible.
+    """
     store = SessionStore()
-    results = replay_all(CORPUS, _agent(fake_llm, telemetry), store)
+    names = list(CORPUS)
+    sessions = [load_session(name) for name in names]
 
-    assert len(results) == len(CORPUS)
-    for result in results:
+    results = replay_all(names, _agent(fake_llm, telemetry), store)
+
+    assert len(results) == len(names)
+    for name, session, result in zip(names, sessions, results):
+        expected_history = [
+            *session["messages"],
+            {"role": "assistant", "content": result.reply},
+        ]
+        assert store.history(result.session_id) == expected_history
         assert store.turns(result.session_id) == 1
-        history = store.history(result.session_id)
-        # The last message of a session is the reply this replay produced: no
-        # other session's turn may have landed in this history.
-        assert history[-1] == {"role": "assistant", "content": result.reply}
+        assert CORPUS[name] in result.reply
 
 
 def test_concurrent_turns_on_one_session_are_all_counted(fake_llm, telemetry):
