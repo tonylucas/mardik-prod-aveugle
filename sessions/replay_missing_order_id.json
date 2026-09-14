@@ -1,0 +1,10 @@
+{
+  "session_id": "replay-missing-order-003",
+  "recorded_at": "2026-09-05T16:48:51Z",
+  "note": "Aucun numéro de commande dans toute la session : l'agent doit demander à clarifier, et n'appeler aucun outil.",
+  "messages": [
+    {"role": "user", "content": "Bonjour, je n'ai toujours rien reçu."},
+    {"role": "assistant", "content": "Bonjour ! Je vais vérifier cela avec vous."},
+    {"role": "user", "content": "C'était censé arriver la semaine dernière."}
+  ]
+}

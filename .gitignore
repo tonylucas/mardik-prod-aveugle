@@ -17,9 +17,6 @@ htmlcov/
 dist/
 build/
 
-# uv
-uv.lock
-
 # Env
 .env
 .env.local
@@ -34,3 +31,7 @@ uv.lock
 
 # Docker
 .docker-data/
+
+# Notes de travail, hors livrable
+PLAN.md
+docs/RECIT.md

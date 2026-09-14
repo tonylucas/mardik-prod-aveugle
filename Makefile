@@ -1,4 +1,4 @@
-.PHONY: up down test fmt lint typecheck install
+.PHONY: up down test trace fmt lint typecheck install
 
 install:
 	uv sync
@@ -11,6 +11,9 @@ down:
 
 test:
 	uv run pytest -v
+
+trace:
+	uv run python scripts/emit_traces.py
 
 fmt:
 	uv run ruff format .
