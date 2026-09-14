@@ -23,7 +23,7 @@ from opentelemetry.sdk.trace.export import (
     SimpleSpanProcessor,
     SpanExporter,
 )
-from opentelemetry.trace import Tracer
+from opentelemetry.trace import INVALID_SPAN_CONTEXT, SpanContext, Tracer
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -56,6 +56,10 @@ class Telemetry:
         self.errors = meter.create_counter(
             "errors_total",
             description="Count of agent turns that ended in an error.",
+        )
+        self.turns = meter.create_counter(
+            "turns_total",
+            description="Count of agent turns started, per session.",
         )
 
     def record_latency(self, value_ms: float, **attributes: str) -> None:
@@ -102,11 +106,14 @@ class _NoOpSpan:
     def __enter__(self) -> "_NoOpSpan":
         return self
 
-    def __exit__(self, *exc: object) -> bool:
-        return False
+    def __exit__(self, *exc: object) -> None:
+        return None
 
     def set_attribute(self, *args: object, **kwargs: object) -> None:
         pass
+
+    def get_span_context(self) -> SpanContext:
+        return INVALID_SPAN_CONTEXT
 
 
 class _NoOpTracer:
@@ -130,6 +137,7 @@ class NoOpTelemetry:
         self.logger = structlog.get_logger("mardik")
         self.latency_ms = _NoOpInstrument()
         self.errors = _NoOpInstrument()
+        self.turns = _NoOpInstrument()
 
     def record_latency(self, value_ms: float, **attributes: str) -> None:
         pass

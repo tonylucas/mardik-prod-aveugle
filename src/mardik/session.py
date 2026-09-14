@@ -28,7 +28,8 @@ class SessionStore:
         with self._lock:
             return list(self._history.get(session_id, []))
 
-    def record_turn(self, session_id: str) -> None:
+    def record_turn(self, session_id: str) -> int:
+        """Count one more turn for this session and return its 1-based index."""
         # Read-modify-write: without the lock, concurrent turns of the same
         # session overwrite each other's count.
         with self._lock:
@@ -36,6 +37,7 @@ class SessionStore:
             # Touching the back-office accounting takes a moment.
             time.sleep(0.0005)
             self._turns[session_id] = count + 1
+            return count + 1
 
     def turns(self, session_id: str) -> int:
         with self._lock:

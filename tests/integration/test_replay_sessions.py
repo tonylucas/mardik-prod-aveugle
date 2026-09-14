@@ -70,3 +70,24 @@ def test_concurrent_turns_on_one_session_are_all_counted(fake_llm, telemetry):
     replay_all(["replay_delivery"] * 8, _agent(fake_llm, telemetry), store)
 
     assert store.turns(session_id) == 8
+
+
+def test_concurrent_sessions_produce_separate_traces(fake_llm, telemetry, span_exporter):
+    """One trace per session, and every child span attached to the right one.
+
+    A turn of session B hanging under the trace of session A is invisible in the
+    histories — only the trace shows it, which is why it needs its own test.
+    """
+    names = list(CORPUS)
+    replay_all(names, _agent(fake_llm, telemetry), SessionStore())
+
+    trace_of_session: dict[str, int] = {}
+    for span in span_exporter.get_finished_spans():
+        session_id = span.attributes["session_id"]
+        trace_id = span.context.trace_id
+        assert trace_of_session.setdefault(session_id, trace_id) == trace_id, (
+            f"{span.name} of {session_id} landed in another session's trace"
+        )
+
+    assert len(trace_of_session) == len(names)
+    assert len(set(trace_of_session.values())) == len(names)
