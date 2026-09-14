@@ -6,6 +6,7 @@ from typing import Any
 from .agent import Agent
 from .config import Settings, load_settings
 from .session import SessionStore
+from .telemetry import build_default_telemetry, build_telemetry
 from .tools import DEFAULT_TOOLS
 
 
@@ -20,12 +21,16 @@ def build_agent(
         from .llm import get_llm
 
         llm = get_llm(settings)
-    return Agent(llm=llm, tools=DEFAULT_TOOLS)
+    if telemetry is None:
+        telemetry = build_telemetry(level=settings.log_level)
+    return Agent(llm=llm, tools=DEFAULT_TOOLS, telemetry=telemetry)
 
 
 def main() -> None:
     settings = load_settings()
-    agent = build_agent(settings=settings)
+    agent = build_agent(
+        settings=settings, telemetry=build_default_telemetry(level=settings.log_level)
+    )
     store = SessionStore()
     result = agent.run_turn(store, "cli", "Bonjour")
     print(result.reply)
