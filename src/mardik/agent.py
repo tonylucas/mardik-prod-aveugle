@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
-from .errors import LLMTimeoutError
+from .errors import LLMTimeoutError, MardikError
 from .session import SessionStore
 from .telemetry import NoOpTelemetry
 
@@ -76,13 +76,18 @@ class Agent:
             store.append(session_id, {"role": "user", "content": user_message})
             store.record_turn(session_id)
 
-            reply = self._invoke_llm(store.history(session_id))
-
-            text = reply.content
-            for call in reply.tool_calls:
-                text = self._dispatch_tool(call)
+            try:
+                reply = self._invoke_llm(store.history(session_id))
+                text = reply.content
+                for call in reply.tool_calls:
+                    text = self._dispatch_tool(call)
+            except MardikError:
+                self.telemetry.errors.add(1, {"session_id": session_id})
+                raise
+            finally:
+                elapsed_ms = (time.perf_counter() - start) * 1000.0
+                self.telemetry.record_latency(elapsed_ms, session_id=session_id)
 
             store.append(session_id, {"role": "assistant", "content": text})
-            elapsed_ms = (time.perf_counter() - start) * 1000.0
             print(f"turn completed for {session_id} in {elapsed_ms:.1f}ms")
             return TurnResult(session_id=session_id, reply=text)
