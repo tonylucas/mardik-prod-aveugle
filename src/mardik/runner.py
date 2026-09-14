@@ -21,8 +21,14 @@ def load_session(name: str) -> dict[str, Any]:
 
 
 def replay(session_data: dict[str, Any], agent: Agent, store: SessionStore) -> TurnResult:
-    """Replay a recorded session and return the result of its final turn."""
+    """Replay a recorded session and return the result of its final turn.
+
+    Every message that precedes the final one is seeded into the store first:
+    a turn is only faithful to the recording if the agent sees the same
+    conversation history the real one had.
+    """
     session_id = session_data["session_id"]
     messages = session_data["messages"]
-    last = messages[-1]
-    return agent.run_turn(store, session_id, last["content"])
+    for message in messages[:-1]:
+        store.append(session_id, message)
+    return agent.run_turn(store, session_id, messages[-1]["content"])
