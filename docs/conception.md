@@ -193,6 +193,50 @@ app (SDK OpenTelemetry, conventions gen_ai.*)
 
 Un seul SDK, trois signaux, corrélés par `trace.id` et `session.id`.
 
+## Ce qui a été implémenté
+
+Cette section est ajoutée après le développement. Les quatre sections
+précédentes sont la conception *préliminaire* et ne sont pas retouchées : leur
+écart avec le code est lui-même une information.
+
+Arbre de spans réellement émis — l'agent Mardik n'a ni RAG ni boucle
+multi-tours, donc trois niveaux au lieu de six :
+
+```
+agent.turn                  session_id, turn_index
+├─ llm.invoke               dans le thread worker, contexte OTel rattaché
+│                           gen_ai.operation.name, gen_ai.request.message_count,
+│                           gen_ai.response.tool_call_count, gen_ai.request.model
+└─ tool.call                tool.name, tool.arguments, tool.status
+```
+
+| Prévu | Réalisé | Pourquoi l'écart |
+|---|---|---|
+| `session` comme racine de trace | `agent.turn` est la racine, `session_id` en attribut | un tour de rejeu = un processus ; corréler par attribut suffit et se filtre aussi bien dans Jaeger |
+| `retrieval`, `prompt_build`, `response_validate` | absents | l'application n'a ni RAG, ni assemblage de prompt, ni validation de schéma. Instrumenter ce qui n'existe pas est du bruit |
+| `turn.tokens.total`, `turn.cost_usd`, `llm.tokens.*` | **non fait** | `Reply` ne porte pas l'usage et aucun faux LLM ne peut l'inventer ; il faudrait l'extraire de la réponse Azure dans `llm.py`. À faire le jour où le coût est suivi |
+| `git.sha`, `prompt.version`, `app.version` | non fait | pas de pipeline de déploiement dans l'exercice ; c'est pourtant le premier réflexe d'enquête et ça resterait à ajouter en vrai |
+| messages en événements de span | attributs `gen_ai.input.messages` / `output.messages` | plus simple à lire dans Jaeger ; un événement par message serait plus conforme à la convention |
+| rédaction PII avant export | **drapeau tout-ou-rien** `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, éteint par défaut | une vraie rédaction demande de savoir quoi masquer. Le drapeau est la version honnête : par défaut aucun contenu ne sort |
+| *tail sampling* | non fait | pertinent au volume de production, inutile sur quatre sessions rejouées |
+| cinq courbes de garde | `latency_ms`, `errors_total`, `turns_total` par session | les trois qu'on peut alimenter sans outil ni coût ; le taux d'échec par outil se dérive de `tool.status` |
+
+Deux ajouts **non prévus**, sortis de la relecture des traces dans Jaeger :
+
+- **`tool.status` = `ok` / `not_found`.** Une commande introuvable répond sans
+  rien résoudre : span vert, statut OK, latence normale, utilisateur non aidé.
+  C'est exactement le « succès technique au mauvais résultat » annoncé en
+  section 1, et aucun compteur d'erreurs ne le verra jamais.
+- **`tool.arguments` toujours enregistré.** Sans lui, `tool.status=not_found`
+  dit qu'une recherche a échoué mais jamais laquelle. La section 3 prévoyait
+  `tool.args` rédactés ; l'expérience montre que c'est l'attribut qu'on regarde
+  en premier.
+
+Chaîne d'export réelle : SDK OpenTelemetry → OTLP/gRPC → Jaeger all-in-one
+(`make up`, `make trace`). Les métriques restent sur `ConsoleMetricExporter` :
+Jaeger ne les ingère pas, et brancher Prometheus n'apportait rien à
+l'exercice. Logs structlog en JSON, porteurs du `trace_id`.
+
 ## Références
 
 - **OpenTelemetry, conventions sémantiques GenAI** —
@@ -201,5 +245,10 @@ Un seul SDK, trois signaux, corrélés par `trace.id` et `session.id`.
 - **Anthropic, « Building effective agents »** —
   <https://www.anthropic.com/engineering/building-effective-agents> — la boucle
   agent, les plafonds de tours, la trajectoire comme objet à observer.
+- **Hamel Husain, « Your AI Product Needs Evals »** —
+  <https://hamel.dev/blog/posts/evals/> — l'article d'ingénierie retenu.
+  Trois niveaux (assertions → humain + LLM-as-judge recalé sur un jeu de
+  référence → A/B test), et l'argument qui a guidé l'instrumentation ici :
+  relire une trace doit être gratuit en effort, sinon personne ne le fait.
 - Documentation Langfuse « Tracing concepts » et l'article Arize Phoenix sur le
   *LLM tracing* couvrent le même terrain côté outillage.
