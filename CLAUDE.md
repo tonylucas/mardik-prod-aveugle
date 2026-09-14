@@ -4,13 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Nature du dépôt
 
-Ce dépôt est le **point de départ d'un exercice**, pas une application saine. `brief.md`
-décrit la mission (rendre l'application diagnosticable : tests d'intégration multi-sessions
-et tracing), `conception.md` contient le travail préliminaire de conception.
+Ce dépôt est un **exercice** : rendre une application diagnosticable (tests d'intégration
+multi-sessions et tracing). `docs/brief.md` décrit la mission, `docs/conception.md` le
+travail préliminaire de conception, `docs/INCIDENTS.md` le journal des incidents résolus.
 
-**La suite de tests est rouge à dessein : 9 échecs sur 10 tests.** Les tests décrivent le
-comportement *attendu* ; c'est le code source qui est défaillant. Ne « corrige » jamais un
-test pour le faire passer — c'est la spécification. L'inverse est le travail demandé.
+La suite de tests était **rouge à dessein** au départ (9 échecs sur 10). Les six défauts
+sont corrigés sur la branche `chore/pyright-venv` ; la suite compte désormais **33 tests,
+tous verts**. `docs/INCIDENTS.md` donne la cause racine, le correctif et le test qui
+verrouille chacun.
+
+**Les tests sont la spécification.** Ne « corrige » jamais un test pour le faire passer :
+c'est le code source qu'on répare. Un test peut en revanche être *durci* quand il
+n'assertait rien d'utile (cf. `test_replay_smoke`, commit `98a0d75`).
 
 ## Commandes
 
@@ -18,7 +23,8 @@ test pour le faire passer — c'est la spécification. L'inverse est le travail 
 make install                      # uv sync
 cp .env.example .env              # puis renseigner les valeurs
 make up                           # Jaeger all-in-one (UI sur :16686, OTLP gRPC sur :4317)
-make test                         # uv run pytest -v
+make test                         # uv run pytest -v (exporteurs en mémoire, pas de réseau)
+make trace                        # rejoue le corpus vers Jaeger via OTLP réel
 make fmt / make lint / make typecheck
 make down
 ```
@@ -58,23 +64,32 @@ Points structurants, non devinables à la lecture d'un seul fichier :
   rejoue son dernier message utilisateur à travers l'agent complet. C'est le support des
   tests d'intégration.
 
-## Défauts connus (le travail à faire)
+## Observabilité
 
-Chacun est couvert par un test rouge :
+Arbre de spans d'un tour : `agent.turn → llm.invoke` (dans le thread worker) et
+`agent.turn → tool.call`. Tous portent `session_id` et `turn_index`, passés **explicitement
+en argument** (`agent._tag`) : les mettre en état d'instance recréerait la course corrigée
+dans `SessionStore`.
 
-| Où | Défaut |
-|---|---|
-| `app.py` | `build_agent` ignore son paramètre `telemetry` (`# TODO`) → tout tourne en `NoOpTelemetry` |
-| `agent.py` | `_invoke_llm_sync` avale `TimeoutError` et renvoie `None` au lieu de lever `LLMTimeoutError` |
-| `agent.py` | aucun span `tool.call`, aucune mesure `latency_ms`, et la fin de tour part dans un `print()` au lieu d'un log structuré `turn.completed` |
-| `agent.py` | le contexte de trace ne franchit pas le thread worker → `llm.invoke` n'est pas rattaché à `agent.turn` |
-| `session.py` | `record_turn` lit-modifie-écrit sans verrou → tours perdus en concurrence |
-| `sessions/` | `incident_timeout.json` est absent, le test de rejeu correspondant échoue sur `FileNotFoundError` |
+- `llm.invoke` : `gen_ai.operation.name`, `gen_ai.request.message_count`,
+  `gen_ai.response.tool_call_count`, et `gen_ai.request.model` si l'adaptateur l'expose.
+- `tool.call` : `tool.name`, `tool.arguments` (toujours), `tool.status` = `ok` / `not_found`
+  — « l'outil a répondu » n'est pas « l'utilisateur a été aidé ».
+- Métriques : `latency_ms`, `errors_total`, `turns_total`, toutes par `session_id`.
+- Log `turn.completed` (structlog JSON) avec le `trace_id`, pour passer du log à la trace.
+- Le statut `ERROR` et l'événement `exception` viennent **gratuitement** du SDK
+  (`start_as_current_span` a `record_exception=True` par défaut) : ne pas les réimplémenter.
+- Contenu des prompts et réponses derrière `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`,
+  éteint par défaut (donnée personnelle), plafonné à 4000 caractères.
 
 ## Pièges
 
-- **La CI ne lance que `tests/unit`** (`.github/workflows/ci.yml`) : les tests d'intégration
-  ne tournent jamais en CI. C'est cohérent avec le titre du dépôt.
-- **`uv.lock` est dans `.gitignore` et n'est pas suivi** — le dépôt n'est donc pas
-  reproductible. À corriger : le lock doit être committé.
+- Les tests utilisent `InMemorySpanExporter` / `InMemoryMetricReader` : **`make test`
+  n'envoie rien à Jaeger**, c'est voulu (la CI n'a pas de conteneur). Seul `make trace`
+  passe par l'exporteur OTLP.
+- Rien ne charge `.env` : `load_settings()` lit `os.environ`. Faire
+  `set -a; source .env; set +a` avant `make trace`.
+- `app.main()` n'est pas une boucle de conversation : un unique « Bonjour » en dur.
+- Le modèle de production n'a aucun outil branché (`get_llm` ne fait pas de `bind_tools`) :
+  seuls les faux LLM des tests émettent des `tool_calls`.
 - Les logs applicatifs et les messages utilisateur sont en français, le code en anglais.
