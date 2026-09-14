@@ -1,6 +1,8 @@
 """The Mardik agent: turns a user message into a reply, calling tools as needed."""
 from __future__ import annotations
 
+import json
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -25,9 +27,32 @@ class TurnResult:
     reply: str
 
 
+# A span attribute has no size limit of its own, but a backend that drops
+# oversized spans loses the whole turn, not just the text.
+_MAX_CONTENT_CHARS = 4000
+
+
 def _tag(span: Any, attributes: dict[str, Any]) -> None:
     for key, value in attributes.items():
         span.set_attribute(key, value)
+
+
+def capture_content() -> bool:
+    """Whether prompts and replies may be written into spans.
+
+    Off by default, and named after the OpenTelemetry convention: a user's
+    message is personal data, and a trace backend is a third party. Read at
+    call time so it can be switched per deployment without rebuilding.
+    """
+    value = os.environ.get("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _dump(value: Any) -> str:
+    text = json.dumps(value, ensure_ascii=False)
+    if len(text) <= _MAX_CONTENT_CHARS:
+        return text
+    return text[:_MAX_CONTENT_CHARS] + "…[truncated]"
 
 
 class LLM(Protocol):
@@ -52,6 +77,8 @@ class Agent:
             _tag(span, attributes)
             span.set_attribute("gen_ai.operation.name", "chat")
             span.set_attribute("gen_ai.request.message_count", len(messages))
+            if capture_content():
+                span.set_attribute("gen_ai.input.messages", _dump(messages))
             # The production adapter carries the deployment name; the fake LLMs
             # of the test suite do not, and the attribute is simply absent.
             model = getattr(self.llm, "model_name", None)
@@ -62,6 +89,8 @@ class Agent:
             except TimeoutError as exc:
                 raise LLMTimeoutError(str(exc)) from exc
             span.set_attribute("gen_ai.response.tool_call_count", len(reply.tool_calls))
+            if capture_content():
+                span.set_attribute("gen_ai.output.messages", _dump(reply.content))
             return reply
 
     def _invoke_llm(
@@ -93,8 +122,15 @@ class Agent:
         with self.telemetry.tracer.start_as_current_span("tool.call") as span:
             _tag(span, attributes)
             span.set_attribute("tool.name", call["name"])
+            # Always recorded: without the arguments, "not_found" says a lookup
+            # failed but never which one. They are the agent's own structured
+            # parameters, not the user's prose — though a topic argument can
+            # still echo it, which is why they are dumped through the same cap.
+            span.set_attribute("tool.arguments", _dump(call["args"]))
             tool = self._tools[call["name"]]
             result = tool(**call["args"])
+            if capture_content():
+                span.set_attribute("tool.result", _dump(result))
             # "called" and "helped the user" are not the same thing: an order
             # absent from the back-office answers without resolving anything.
             span.set_attribute("tool.status", "not_found" if "introuvable" in result else "ok")

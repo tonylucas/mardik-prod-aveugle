@@ -92,3 +92,40 @@ def test_turns_counter_is_emitted_per_session(fake_llm, telemetry, metric_reader
         for point in metric.data.data_points
     ]
     assert [(p.attributes["session_id"], p.value) for p in points] == [("counted", 1)]
+
+
+def test_tool_arguments_are_always_recorded(fake_llm, telemetry, span_exporter):
+    _run(fake_llm, telemetry, message="Ma commande #9999 ?")
+    attributes = _spans(span_exporter)["tool.call"].attributes
+    # Without the arguments, tool.status says a lookup failed but never which.
+    assert attributes["tool.arguments"] == '{"order_id": "9999"}'
+
+
+def test_content_is_not_captured_by_default(fake_llm, telemetry, span_exporter):
+    _run(fake_llm, telemetry)
+    for span in span_exporter.get_finished_spans():
+        assert "gen_ai.input.messages" not in span.attributes
+        assert "gen_ai.output.messages" not in span.attributes
+        assert "tool.result" not in span.attributes
+
+
+@pytest.mark.parametrize("flag", ["1", "true", "ON"])
+def test_content_is_captured_when_opted_in(
+    flag, fake_llm, telemetry, span_exporter, monkeypatch
+):
+    monkeypatch.setenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", flag)
+    _run(fake_llm, telemetry, message="Ma commande #1042 ?")
+
+    spans = _spans(span_exporter)
+    assert "Ma commande #1042 ?" in spans["llm.invoke"].attributes["gen_ai.input.messages"]
+    assert "expédiée" in spans["tool.call"].attributes["tool.result"]
+
+
+def test_captured_content_is_truncated(fake_llm, telemetry, span_exporter, monkeypatch):
+    monkeypatch.setenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "1")
+    _run(fake_llm, telemetry, message="#1042 " + "x" * 8000)
+
+    captured = _spans(span_exporter)["llm.invoke"].attributes["gen_ai.input.messages"]
+    # A backend that drops an oversized span loses the whole turn, not the text.
+    assert captured.endswith("…[truncated]")
+    assert len(captured) < 4100
