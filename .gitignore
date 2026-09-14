@@ -17,9 +17,6 @@ htmlcov/
 dist/
 build/
 
-# uv
-uv.lock
-
 # Env
 .env
 .env.local
