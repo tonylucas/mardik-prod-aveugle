@@ -63,8 +63,10 @@ class Agent:
         return box["reply"]
 
     def _dispatch_tool(self, call: dict[str, Any]) -> str:
-        tool = self._tools[call["name"]]
-        return tool(**call["args"])
+        with self.telemetry.tracer.start_as_current_span("tool.call") as span:
+            span.set_attribute("tool.name", call["name"])
+            tool = self._tools[call["name"]]
+            return tool(**call["args"])
 
     def run_turn(
         self, store: SessionStore, session_id: str, user_message: str
