@@ -1,0 +1,8 @@
+{
+  "session_id": "replay-preparation-002",
+  "recorded_at": "2026-09-03T09:14:22Z",
+  "note": "Numéro de commande donné d'entrée : l'agent doit appeler lookup_order sans rien demander.",
+  "messages": [
+    {"role": "user", "content": "Bonjour, où en est ma commande #2098 ?"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "session_id": "replay-unknown-order-004",
+  "recorded_at": "2026-09-08T11:02:36Z",
+  "note": "Commande absente du back-office : l'outil répond « introuvable ». L'outil a bien été appelé, mais l'utilisateur n'est pas aidé.",
+  "messages": [
+    {"role": "user", "content": "Bonjour, pouvez-vous regarder ma commande #9999 ?"}
+  ]
+}
