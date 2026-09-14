@@ -31,3 +31,7 @@ build/
 
 # Docker
 .docker-data/
+
+# Notes de travail, hors livrable
+PLAN.md
+docs/RECIT.md
