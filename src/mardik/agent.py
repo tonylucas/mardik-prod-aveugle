@@ -6,6 +6,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from opentelemetry import context as otel_context
+
 from .errors import LLMTimeoutError, MardikError
 from .session import SessionStore
 from .telemetry import NoOpTelemetry
@@ -46,14 +48,20 @@ class Agent:
                 raise LLMTimeoutError(str(exc)) from exc
 
     def _invoke_llm(self, messages: list[dict[str, Any]]) -> Reply:
-        # The Azure SDK call is blocking, so run it on a worker thread.
+        # The Azure SDK call is blocking, so run it on a worker thread. The
+        # OpenTelemetry context is thread-local: capture it here and re-attach
+        # it inside the worker, otherwise llm.invoke opens a trace of its own.
         box: dict[str, Any] = {}
+        parent = otel_context.get_current()
 
         def worker() -> None:
+            token = otel_context.attach(parent)
             try:
                 box["reply"] = self._invoke_llm_sync(messages)
             except BaseException as exc:  # re-raised on the calling thread
                 box["error"] = exc
+            finally:
+                otel_context.detach(token)
 
         thread = threading.Thread(target=worker)
         thread.start()
