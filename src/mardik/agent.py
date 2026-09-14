@@ -89,5 +89,7 @@ class Agent:
                 self.telemetry.record_latency(elapsed_ms, session_id=session_id)
 
             store.append(session_id, {"role": "assistant", "content": text})
-            print(f"turn completed for {session_id} in {elapsed_ms:.1f}ms")
+            self.telemetry.logger.info(
+                "turn.completed", session_id=session_id, duration_ms=round(elapsed_ms, 1)
+            )
             return TurnResult(session_id=session_id, reply=text)
