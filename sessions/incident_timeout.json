@@ -1,0 +1,10 @@
+{
+  "session_id": "incident-timeout-014",
+  "recorded_at": "2026-09-12T14:31:07Z",
+  "note": "Le modèle n'a jamais répondu : le tour est resté ouvert jusqu'à l'échéance.",
+  "messages": [
+    {"role": "user", "content": "Bonjour, ma commande #3157 a été retournée, où en est le remboursement ?"},
+    {"role": "assistant", "content": "Bonjour ! Je vérifie l'état de votre remboursement."},
+    {"role": "user", "content": "Merci, c'est urgent."}
+  ]
+}
